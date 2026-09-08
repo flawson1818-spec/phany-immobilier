@@ -1,0 +1,32 @@
+# Blueprint Render — https://render.com/docs/blueprint-spec
+# Déploiement : Render Dashboard → New → Blueprint → sélectionner ce repo.
+services:
+  - type: web
+    name: phany-immobilier
+    runtime: node
+    region: frankfurt
+    plan: free
+    branch: main
+    buildCommand: npm ci && npx prisma migrate deploy && npm run build
+    startCommand: npm run start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20.18.0"
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: NEXT_PUBLIC_APP_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: phany-properties
+      - key: AI_PROVIDER
+        value: heuristic
