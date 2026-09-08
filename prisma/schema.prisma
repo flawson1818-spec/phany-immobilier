@@ -1,0 +1,228 @@
+// PHANY IMMOBILIER — schéma de base de données
+// PostgreSQL + Prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  AGENT
+  OWNER
+  CLIENT
+}
+
+enum PropertyOperation {
+  RENT
+  SALE
+}
+
+enum PropertyType {
+  HOUSE
+  APARTMENT
+  STUDIO
+  VILLA
+  LAND
+  SHOP
+  OFFICE
+  WAREHOUSE
+  BUILDING
+  FURNISHED
+}
+
+// Cycle de vie d'une annonce
+enum PropertyStatus {
+  DRAFT // brouillon propriétaire
+  PENDING // soumis, en attente de vérification PHANY
+  NEEDS_FIX // correction demandée au propriétaire
+  VERIFIED // vérifié, prêt à publier
+  PUBLISHED // visible dans la recherche publique
+  RESERVED
+  RENTED
+  SOLD
+  ARCHIVED
+  REJECTED
+}
+
+enum VisitStatus {
+  REQUESTED // demandé par le client
+  CONFIRMED // confirmé par PHANY
+  ASSIGNED // agent affecté
+  COMPLETED // visite effectuée
+  CANCELLED
+}
+
+enum NotificationType {
+  PROPERTY_STATUS
+  VISIT_STATUS
+  ACCOUNT
+  SYSTEM
+}
+
+// ---------------------------------------------------------------------------
+// Modèles
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  phone        String?
+  passwordHash String
+  role         Role     @default(CLIENT)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  properties         Property[]          @relation("OwnerProperties")
+  visitsAsClient     Visit[]             @relation("ClientVisits")
+  visitsAsAgent      Visit[]             @relation("AgentVisits")
+  favorites          Favorite[]
+  notifications      Notification[]
+  auditLogs          AuditLog[]          @relation("ActorLogs")
+  passwordResets     PasswordResetToken[]
+
+  @@index([role])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Property {
+  id          String            @id @default(cuid())
+  reference   String            @unique
+  ownerId     String
+  owner       User              @relation("OwnerProperties", fields: [ownerId], references: [id])
+  title       String
+  type        PropertyType
+  operation   PropertyOperation
+  price       Decimal           @db.Decimal(18, 2)
+  currency    String            @default("XOF")
+  country     String            @default("Togo")
+  city        String            @default("Lomé")
+  district    String
+  address     String?
+  latitude    Float?
+  longitude   Float?
+  surface     Float?
+  bedrooms    Int?
+  bathrooms   Int?
+  furnished   Boolean           @default(false)
+  features    String[]          @default([])
+  description String
+  status      PropertyStatus    @default(DRAFT)
+  reviewNote  String? // motif de refus / correction demandée
+  reviewedById String?
+  reviewedAt  DateTime?
+  publishedAt DateTime?
+  availableFrom DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  images PropertyImage[]
+  visits Visit[]
+  favorites Favorite[]
+
+  @@index([status, operation, type])
+  @@index([city, district])
+  @@index([price])
+  @@index([ownerId])
+}
+
+model PropertyImage {
+  id         String   @id @default(cuid())
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  url        String
+  path       String? // chemin dans le bucket de stockage (pour suppression)
+  alt        String?
+  isPrimary  Boolean  @default(false)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  @@index([propertyId])
+}
+
+model Visit {
+  id          String      @id @default(cuid())
+  propertyId  String
+  property    Property    @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  clientId    String
+  client      User        @relation("ClientVisits", fields: [clientId], references: [id])
+  agentId     String?
+  agent       User?       @relation("AgentVisits", fields: [agentId], references: [id])
+  status      VisitStatus @default(REQUESTED)
+  requestedAt DateTime    @default(now())
+  scheduledAt DateTime?
+  completedAt DateTime?
+  feeAmount   Decimal?    @db.Decimal(18, 2) // frais de visite (paiement à brancher plus tard)
+  feePaid     Boolean     @default(false)
+  note        String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([status])
+  @@index([clientId])
+  @@index([propertyId])
+}
+
+model Favorite {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, propertyId])
+  @@index([userId])
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType @default(SYSTEM)
+  title     String
+  body      String?
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  @@index([userId, readAt])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  actor     User?    @relation("ActorLogs", fields: [actorId], references: [id])
+  action    String // ex: "property.publish"
+  entity    String // ex: "Property"
+  entityId  String?
+  meta      Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
